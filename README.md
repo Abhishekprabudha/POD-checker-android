@@ -66,6 +66,33 @@ Inside the successful workflow run:
 - Allow installation from unknown sources if Android asks.
 - Install and test.
 
+## Local build requirements (important)
+- Use **JDK 17** for Gradle/Android builds.
+- This repository includes a `.java-version` file (`17.0.2`) so version managers like `mise`/`jenv` can auto-select a compatible JDK.
+- If you run with newer JDKs (for example JDK 25), Kotlin/Gradle script compilation can fail early with errors similar to:
+  - `java.lang.IllegalArgumentException: 25.0.1`
+
+### Quick local verification command
+If your shell is not automatically picking JDK 17, set it explicitly before building:
+
+```bash
+export JAVA_HOME=/path/to/jdk-17
+export PATH="$JAVA_HOME/bin:$PATH"
+gradle :app:assembleDebug
+```
+
+### If your network blocks Google/Maven/Gradle plugin repos
+In restricted environments (corporate proxy / private runners), point Gradle to internal mirrors:
+
+```bash
+export GOOGLE_MAVEN_MIRROR_URL="https://<your-internal-google-mirror>"
+export MAVEN_CENTRAL_MIRROR_URL="https://<your-internal-mavencentral-mirror>"
+export GRADLE_PLUGIN_PORTAL_MIRROR_URL="https://<your-internal-gradle-plugin-portal-mirror>"
+gradle :app:assembleDebug
+```
+
+`settings.gradle.kts` will automatically use these mirror URLs when set; otherwise it falls back to `google()`, `mavenCentral()`, and `gradlePluginPortal()`.
+
 ## Repo structure
 ```text
 pod_delivery_validator_android/

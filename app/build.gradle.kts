@@ -70,7 +70,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("com.google.android.material:material:1.12.0")
 
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("com.google.mlkit:face-detection:16.1.7")

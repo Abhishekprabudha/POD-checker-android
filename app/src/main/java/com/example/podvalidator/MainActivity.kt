@@ -77,6 +77,7 @@ fun DeliveryValidatorApp() {
     var selectedDelivery by remember { mutableStateOf<DeliveryPoint?>(null) }
     var status by remember { mutableStateOf("Enter a waybill number to begin.") }
     var photoBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var waybillEntryLocation by remember { mutableStateOf<android.location.Location?>(null) }
     var validationResult by remember { mutableStateOf<ValidationResult?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -116,7 +117,12 @@ fun DeliveryValidatorApp() {
                     status = "Select a valid waybill first."
                     return@launch
                 }
-                validationResult = validateDelivery(context, bitmap, delivery)
+                validationResult = validateDelivery(
+                    context = context,
+                    bitmap = bitmap,
+                    delivery = delivery,
+                    waybillEntryLocation = waybillEntryLocation
+                )
                 status = validationResult?.summary ?: "Validation complete."
             }
         }
@@ -149,11 +155,23 @@ fun DeliveryValidatorApp() {
             onValueChange = {
                 waybill = it.trim().uppercase()
                 selectedDelivery = repo.findWaybill(waybill)
+                waybillEntryLocation = null
+                photoBitmap = null
                 validationResult = null
                 status = if (selectedDelivery == null) {
                     "Waybill not found yet."
                 } else {
-                    "Waybill found. Review address and capture photo."
+                    "Waybill found. Capturing current location for waybill cross-validation."
+                }
+                selectedDelivery?.let {
+                    scope.launch {
+                        waybillEntryLocation = captureCurrentLocationIfPossible(context)
+                        status = if (waybillEntryLocation == null) {
+                            "Waybill found, but location at waybill entry could not be captured. Keep location ON and try again."
+                        } else {
+                            "Waybill found and entry-time location captured. Review details and take live photo."
+                        }
+                    }
                 }
             },
             modifier = Modifier.fillMaxWidth(),
@@ -168,7 +186,21 @@ fun DeliveryValidatorApp() {
                     Text("Waybill: ${delivery.waybill}")
                     Text("Customer: ${delivery.customerName}")
                     Text("Address: ${delivery.address}")
-                    Text("Expected GPS: ${delivery.latitude}, ${delivery.longitude}")
+                    Text(
+                        "Expected GPS: ${
+                            if (delivery.latitude != null && delivery.longitude != null) {
+                                "${delivery.latitude}, ${delivery.longitude}"
+                            } else {
+                                "Not available in deliveries.json"
+                            }
+                        }"
+                    )
+                    Text(
+                        "Waybill entry GPS: ${
+                            waybillEntryLocation?.let { "${it.latitude}, ${it.longitude}" }
+                                ?: "Not captured yet"
+                        }"
+                    )
                 }
             }
         }
@@ -194,6 +226,17 @@ fun DeliveryValidatorApp() {
                 if (!isLocationEnabled(context)) {
                     status = "Location is OFF. Turn it on to continue."
                     requestLocationEnable(context, enableLocationLauncher) {}
+                    return@Button
+                }
+                if (waybillEntryLocation == null) {
+                    scope.launch {
+                        waybillEntryLocation = captureCurrentLocationIfPossible(context)
+                        status = if (waybillEntryLocation == null) {
+                            "Could not capture location at waybill-entry stage. Keep location ON and retry."
+                        } else {
+                            "Waybill entry location captured. You can take a live photo now."
+                        }
+                    }
                     return@Button
                 }
                 capturePhotoLauncher.launch(null)
@@ -222,10 +265,20 @@ fun DeliveryValidatorApp() {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Validation Result", fontWeight = FontWeight.Bold)
                     Text("Decision: ${if (result.isGenuine) "GENUINE DELIVERY" else "NOT GENUINE / NEED REVIEW"}")
+                    Text("Cross-validation type: ${result.validationMode}")
                     Text("Face/person risk found: ${if (result.faceDetected) "Yes" else "No"}")
+                    Text("Waybill entry GPS: ${result.waybillEntryLatitude}, ${result.waybillEntryLongitude}")
                     Text("Captured GPS: ${result.capturedLatitude}, ${result.capturedLongitude}")
                     Text("Expected GPS: ${result.expectedLatitude}, ${result.expectedLongitude}")
-                    Text("Distance from mapped delivery point: ${"%.2f".format(result.distanceMeters)} meters")
+                    result.waybillToPhotoDistanceMeters?.let {
+                        Text("Distance (waybill entry ↔ photo): ${"%.2f".format(it)} meters")
+                    }
+                    result.waybillToBackendDistanceMeters?.let {
+                        Text("Distance (waybill entry ↔ backend): ${"%.2f".format(it)} meters")
+                    }
+                    result.photoToBackendDistanceMeters?.let {
+                        Text("Distance (photo ↔ backend): ${"%.2f".format(it)} meters")
+                    }
                     Text("Rule threshold: ${result.allowedRadiusMeters.toInt()} meters")
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(result.summary)
@@ -238,51 +291,128 @@ fun DeliveryValidatorApp() {
 private suspend fun validateDelivery(
     context: Context,
     bitmap: Bitmap,
-    delivery: DeliveryPoint
+    delivery: DeliveryPoint,
+    waybillEntryLocation: android.location.Location?
 ): ValidationResult {
     val faceDetected = detectFace(bitmap)
-    val location = getCurrentLocation(context)
-    if (location == null) {
+    if (waybillEntryLocation == null) {
         return ValidationResult(
             isGenuine = false,
             faceDetected = faceDetected,
+            validationMode = "Two-way cross-validation (incomplete)",
+            waybillEntryLatitude = null,
+            waybillEntryLongitude = null,
             capturedLatitude = null,
             capturedLongitude = null,
             expectedLatitude = delivery.latitude,
             expectedLongitude = delivery.longitude,
-            distanceMeters = Double.MAX_VALUE,
+            waybillToPhotoDistanceMeters = null,
+            waybillToBackendDistanceMeters = null,
+            photoToBackendDistanceMeters = null,
             allowedRadiusMeters = delivery.allowedRadiusMeters,
-            summary = "Could not fetch live location. Delivery cannot be validated."
+            summary = "Could not capture location when waybill was entered. Delivery cannot be validated."
         )
     }
 
-    val distanceMeters = distanceMeters(
-        location.latitude,
-        location.longitude,
-        delivery.latitude,
-        delivery.longitude
+    val photoLocation = getCurrentLocation(context)
+    if (photoLocation == null) {
+        return ValidationResult(
+            isGenuine = false,
+            faceDetected = faceDetected,
+            validationMode = "Two-way cross-validation (incomplete)",
+            waybillEntryLatitude = waybillEntryLocation.latitude,
+            waybillEntryLongitude = waybillEntryLocation.longitude,
+            capturedLatitude = null,
+            capturedLongitude = null,
+            expectedLatitude = delivery.latitude,
+            expectedLongitude = delivery.longitude,
+            waybillToPhotoDistanceMeters = null,
+            waybillToBackendDistanceMeters = null,
+            photoToBackendDistanceMeters = null,
+            allowedRadiusMeters = delivery.allowedRadiusMeters,
+            summary = "Could not fetch location at the time of photo capture. Delivery cannot be validated."
+        )
+    }
+
+    val waybillToPhotoDistance = distanceMeters(
+        waybillEntryLocation.latitude,
+        waybillEntryLocation.longitude,
+        photoLocation.latitude,
+        photoLocation.longitude
     )
 
-    val withinRadius = distanceMeters <= delivery.allowedRadiusMeters
+    val hasBackendCoordinates = delivery.latitude != null && delivery.longitude != null
+    val waybillToBackendDistance = if (hasBackendCoordinates) {
+        distanceMeters(
+            waybillEntryLocation.latitude,
+            waybillEntryLocation.longitude,
+            delivery.latitude!!,
+            delivery.longitude!!
+        )
+    } else {
+        null
+    }
+    val photoToBackendDistance = if (hasBackendCoordinates) {
+        distanceMeters(
+            photoLocation.latitude,
+            photoLocation.longitude,
+            delivery.latitude!!,
+            delivery.longitude!!
+        )
+    } else {
+        null
+    }
+
+    val radius = delivery.allowedRadiusMeters
+    val withinRadius = if (hasBackendCoordinates) {
+        waybillToPhotoDistance <= radius &&
+            (waybillToBackendDistance ?: Double.MAX_VALUE) <= radius &&
+            (photoToBackendDistance ?: Double.MAX_VALUE) <= radius
+    } else {
+        waybillToPhotoDistance <= radius
+    }
     val isGenuine = withinRadius && !faceDetected
+    val validationMode = if (hasBackendCoordinates) {
+        "Three-way cross-validation"
+    } else {
+        "Two-way cross-validation"
+    }
+
     val summary = when {
-        faceDetected && !withinRadius -> "Delivery rejected: visible person/face detected and delivery location does not match mapped address."
-        faceDetected -> "Delivery rejected: visible person/face detected. Retake the photo without any person in frame."
-        !withinRadius -> "Delivery rejected: captured location is outside the allowed delivery radius."
-        else -> "Delivery validated successfully. Live location matches the mapped destination and no visible face was detected."
+        faceDetected && !withinRadius ->
+            "$validationMode failed: visible person/face detected and location checks are outside accepted radius."
+        faceDetected ->
+            "$validationMode failed: visible person/face detected. Retake the photo without any person in frame."
+        !withinRadius && hasBackendCoordinates ->
+            "$validationMode result = NON GENUINE. Not all three coordinates (waybill entry, photo-time, backend) are within ${radius.toInt()}m."
+        !withinRadius ->
+            "$validationMode result = NON GENUINE. Backend coordinates are not available in deliveries.json, so only two coordinates were compared and are outside ${radius.toInt()}m."
+        hasBackendCoordinates ->
+            "$validationMode result = GENUINE. All three coordinates (waybill entry, photo-time, backend) are within ${radius.toInt()}m."
+        else ->
+            "$validationMode result = GENUINE. Backend coordinates are not available in deliveries.json, so genuine decision is based on two-way location match within ${radius.toInt()}m."
     }
 
     return ValidationResult(
         isGenuine = isGenuine,
         faceDetected = faceDetected,
-        capturedLatitude = location.latitude,
-        capturedLongitude = location.longitude,
+        validationMode = validationMode,
+        waybillEntryLatitude = waybillEntryLocation.latitude,
+        waybillEntryLongitude = waybillEntryLocation.longitude,
+        capturedLatitude = photoLocation.latitude,
+        capturedLongitude = photoLocation.longitude,
         expectedLatitude = delivery.latitude,
         expectedLongitude = delivery.longitude,
-        distanceMeters = distanceMeters,
+        waybillToPhotoDistanceMeters = waybillToPhotoDistance,
+        waybillToBackendDistanceMeters = waybillToBackendDistance,
+        photoToBackendDistanceMeters = photoToBackendDistance,
         allowedRadiusMeters = delivery.allowedRadiusMeters,
         summary = summary
     )
+}
+
+private suspend fun captureCurrentLocationIfPossible(context: Context): android.location.Location? {
+    return if (isLocationEnabled(context)) getCurrentLocation(context) else null
 }
 
 private suspend fun detectFace(bitmap: Bitmap): Boolean {

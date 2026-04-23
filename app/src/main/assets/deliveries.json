@@ -1,6 +1,6 @@
 [
   {"waybill":"WB1001","customerName":"Griselda Patricia","address":"Daerah Khusus Ibukota, Jakarta","latitude":-6.21078,"longitude":106.81850,"allowedRadiusMeters":200.0},
-  {"waybill":"WB1002","customerName":"Diya Shah","address":"Bandra West, Mumbai","latitude":-6.17877,"longitude":106.79757,"allowedRadiusMeters":200.0},
+  {"waybill":"WB1002","customerName":"Griselda Patricia","address":"Daerah Khusus Ibukota, Jakarta","latitude":-6.17877,"longitude":106.79757,"allowedRadiusMeters":200.0},
   {"waybill":"WB1003","customerName":"Rohan Iyer","address":"Indiranagar, Bengaluru","latitude":12.9784,"longitude":77.6408,"allowedRadiusMeters":120.0},
   {"waybill":"WB1004","customerName":"Ananya Rao","address":"Banjara Hills, Hyderabad","latitude":17.4126,"longitude":78.4347,"allowedRadiusMeters":120.0},
   {"waybill":"WB1005","customerName":"Ishaan Sen","address":"Salt Lake Sector V, Kolkata","latitude":22.5760,"longitude":88.4345,"allowedRadiusMeters":120.0},

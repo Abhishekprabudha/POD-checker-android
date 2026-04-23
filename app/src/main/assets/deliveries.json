@@ -9,5 +9,4 @@
   {"waybill":"WB1008","customerName":"Saanvi Patel","address":"Navrangpura, Ahmedabad","latitude":23.0330,"longitude":72.5617,"allowedRadiusMeters":120.0},
   {"waybill":"WB1009","customerName":"Vivaan Khanna","address":"Hazratganj, Lucknow","latitude":26.8506,"longitude":80.9462,"allowedRadiusMeters":120.0},
   {"waybill":"WB1010","customerName":"Myra Joseph","address":"Kakkanad, Kochi","latitude":10.0159,"longitude":76.3419,"allowedRadiusMeters":120.0}
-  {"waybill":"WB1011","customerName":"Test Customer","address":"Test Address","allowedRadiusMeters":120.0}
 ]
